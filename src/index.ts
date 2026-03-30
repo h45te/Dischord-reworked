@@ -65,44 +65,42 @@ export async function ready(token: string | undefined): Promise<boolean> {
         if (result === null) {
             message.reply("音声の生成に失敗しました。");
             return;
-        }
-        message.reply("音声の生成に成功しました。エンコードしています…");
-        const ffmpeg = spawn("ffmpeg", [
-            "-i", "pipe:0",
-            "-vn",
-            "-f", "mp3",
-            "-ac", "1",
-            "-ab", "192k",
-            "-ar", "44100",
-            "-acodec", "libmp3lame",
-            "pipe:1"
-        ], {
-            stdio: ["pipe", "pipe", "pipe"]
-        });
-        let mp3 = Buffer.alloc(0);
-        ffmpeg.stdout.on("data", (data: Buffer) => {
-            mp3 = Buffer.concat([mp3, data]);
-        });
-
-        ffmpeg.on("close", () => {
-            if (voiceChannel) {
-                if (channel === null) {
-                    message.reply("チャンネル情報の取得に失敗しました。");
-                } else {
-                    const resource = createAudioResource(Readable.from(mp3));
-                    const connection = joinVoiceChannel({
-                        channelId: channel.id,
-                        guildId: channel.guild.id,
-                        adapterCreator: channel.guild.voiceAdapterCreator
-                    });
-                    const player = createAudioPlayer({behaviors: { noSubscriber: NoSubscriberBehavior.Pause }});
-                    player.on(AudioPlayerStatus.Idle, () => {
-                        connection.destroy();
-                    });
-                    connection.subscribe(player);
-                    player.play(resource);
-                }
+        } else if (voiceChannel) {
+            if (channel === null) {
+                message.reply("チャンネル情報の取得に失敗しました。");
             } else {
+                const resource = createAudioResource(Readable.from(result));
+                const connection = joinVoiceChannel({
+                    channelId: channel.id,
+                    guildId: channel.guild.id,
+                    adapterCreator: channel.guild.voiceAdapterCreator
+                });
+                const player = createAudioPlayer({behaviors: { noSubscriber: NoSubscriberBehavior.Pause }});
+                player.on(AudioPlayerStatus.Idle, () => {
+                    connection.destroy();
+                });
+                connection.subscribe(player);
+                player.play(resource);
+            }
+        } else {
+            message.reply("音声の生成に成功しました。エンコードしています…");
+            const ffmpeg = spawn("ffmpeg", [
+                "-i", "pipe:0",
+                "-vn",
+                "-f", "mp3",
+                "-ac", "1",
+                "-ab", "192k",
+                "-ar", "44100",
+                "-acodec", "libmp3lame",
+                "pipe:1"
+            ], {
+                stdio: ["pipe", "pipe", "pipe"]
+            });
+            let mp3 = Buffer.alloc(0);
+            ffmpeg.stdout.on("data", (data: Buffer) => {
+                mp3 = Buffer.concat([mp3, data]);
+            });
+            ffmpeg.on("close", () => {
                 if (mp3.length > FILE_MAXSIZE) {
                     message.reply("容量が大きすぎます。");
                     return;
@@ -110,11 +108,10 @@ export async function ready(token: string | undefined): Promise<boolean> {
                 message.reply({
                     files: [new AttachmentBuilder(mp3).setName("result.mp3")]
                 });
-            }
-        });
-
-        ffmpeg.stdin.write(result);
-        ffmpeg.stdin.end();
+            });
+            ffmpeg.stdin.write(result);
+            ffmpeg.stdin.end();
+        };
     });
 
     if (!token) {
