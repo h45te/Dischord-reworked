@@ -1,10 +1,3 @@
-/**
- * These codes are licensed under CC0.
- * https://creativecommons.org/publicdomain/zero/1.0/deed
- */
-
-import {ReadableStreamBuffer} from "stream-buffers";
-
 type WaveType = "noise" | "triangle" | "saw" | "sine" | "square50" | "square25" | "square12.5";
 
 type Wave = {
@@ -47,7 +40,7 @@ type LoopStack = {
     loopCount: number | null
 }[];
 
-export default function(score: string, voiceChannel: boolean): Buffer | ReadableStreamBuffer | null  {
+export default function(score: string): Buffer | null  {
     const tokens = score.toLowerCase().match(/([a-g][-+]?|r)[0-9]*\.?|[;<>()\[]|\][0-9]+|[tlywv][0-9]+|@[0-9]+(,-?[0-9]+)*/g);
     if (tokens === null) {
         return null;
@@ -57,7 +50,7 @@ export default function(score: string, voiceChannel: boolean): Buffer | Readable
     let bufferLength = 0;
     let toneLength = 8;
     let octave = 0;
-    const sampling = voiceChannel ? 96000 : 44100; 
+    const sampling = 44100; 
     let bufferSize = sampling * 10;
     let buffer: Buffer = Buffer.alloc(bufferSize * 2);
     let tone: Wave[] = [];
@@ -68,7 +61,7 @@ export default function(score: string, voiceChannel: boolean): Buffer | Readable
     let volume = 1;
     const loopStack: LoopStack = [];
     const tokenLength = tokens.length;
-    const limit = (voiceChannel ? 20 : 10) * 1000 * 1000 / 2;
+    const limit = 10 * 1000 * 1000 / 2;
     for (let i = 0; i < tokenLength; i++) {
         const currentToken = tokens[i];
         if (currentToken[0] === "r") {
@@ -278,24 +271,18 @@ export default function(score: string, voiceChannel: boolean): Buffer | Readable
             }
         }
     }
-    if (voiceChannel) {
-        const stream = new ReadableStreamBuffer();
-        stream.push(buffer);
-        return stream;
-    } else {
-        const header = Buffer.alloc(48);
-        header.write("RIFF", 0);
-        header.writeUInt32LE(bufferLength * 2 + 36, 4);
-        header.write("WAVEfmt ", 8);
-        header.writeUInt32LE(16, 16);
-        header.writeUInt16LE(1, 20);
-        header.writeUInt16LE(1, 22);
-        header.writeUInt32LE(sampling, 24);
-        header.writeUInt32LE(sampling * 2, 28);
-        header.writeUInt16LE(2, 32);
-        header.writeUInt16LE(16, 34);
-        header.write("data", 36);
-        header.writeUInt32LE(bufferLength * 2, 40);
-        return Buffer.concat([header, buffer], 44 + bufferLength * 2);
-    }
+    const header = Buffer.alloc(48);
+    header.write("RIFF", 0);
+    header.writeUInt32LE(bufferLength * 2 + 36, 4);
+    header.write("WAVEfmt ", 8);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(1, 22);
+    header.writeUInt32LE(sampling, 24);
+    header.writeUInt32LE(sampling * 2, 28);
+    header.writeUInt16LE(2, 32);
+    header.writeUInt16LE(16, 34);
+    header.write("data", 36);
+    header.writeUInt32LE(bufferLength * 2, 40);
+    return Buffer.concat([header, buffer], 44 + bufferLength * 2);
 }

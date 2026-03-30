@@ -1,112 +1,130 @@
-/**
- * These codes are licensed under CC0.
- * https://creativecommons.org/publicdomain/zero/1.0/deed
- */
-
-import * as Discord from "discord.js"
-import compose from "./compose.js"
-import {getConfig, configLoad} from "./config.js"
-import {ReadableStreamBuffer} from "stream-buffers";
+import { Client, GatewayIntentBits, Events, AttachmentBuilder } from "discord.js";
+import type { Message } from "discord.js";
+import { AudioPlayerStatus, createAudioPlayer, createAudioResource, joinVoiceChannel, NoSubscriberBehavior } from "@discordjs/voice";
+import { Readable } from 'node:stream';
 import { spawn } from "child_process";
+import dotenv from "dotenv";
+import compose from "./compose.js";
 
-const client = new Discord.Client();
+dotenv.config();
+const TOKEN = process.env.TOKEN;
+const VOICE_PREFIX = "dv!";
+const CHAT_PREFIX = "dc!";
+const FILE_MAXSIZE = 8 * 1000 * 1000
 
-export async function ready(): Promise<boolean> {
-    client.on("message", async message => {
-        if (message.author.bot || message.content === "") {
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
+});
+
+export async function ready(token: string | undefined): Promise<boolean> {
+    client.on(Events.MessageCreate, async(message: Message) => {
+        const mes = message.content;
+        const member = message.member;
+        if (message.author.bot || !member || !(mes.startsWith(VOICE_PREFIX) || mes.startsWith(CHAT_PREFIX))) {
             return;
         }
-        let voiceChannel = false;
-        if (message.content.slice(0, 3) === "dv!" && message.member.voiceChannel) {
-            voiceChannel = true;
-        } else if (message.content.slice(0, 3) !== "dc!") {
-            return;
-        }
-        const command = message.content.slice(3);
+        const channel = member.voice.channel;
+        const voiceChannel = mes.startsWith(VOICE_PREFIX) && !!channel;
+        const command = mes.slice(3);
         if (command.length > 1000) {
             await message.reply("コマンドが長すぎます。");
             return;
         }
         if (command.trim() === "help") {
             message.reply(
+                "```" +
                 "文法\n" + 
                 "dc!でメッセージを始め、MMLという記法で楽譜を記述すると音楽を再生できます。\n" +
                 "CDEFGABR それぞれドレミファソラシと休符に対応し、音を鳴らします。直後に数字を指定するとn分音符を鳴らします。ピリオドを付けると付点音符になります。\n" + 
                 "L デフォルトの音の長さをn分音符形式で指定します。\n" + 
                 "T テンポを指定します。デフォルトは120です。\n" +
                 "@ 音を指定します。カンマ区切りでパラメータを指定します。複数指定すると音が重なります。パラメータは以下の通りです。(内容=デフォルト値)\n" +
-                "(波形),(音量=100),(オクターブ=±0),(デチューン=100)" +
-                "波形は以下の通りです。" +
-                "0: 矩形波(デューティー比50%), 1: 矩形波(デューティー比25%), 2: 矩形波(デューティー比12.5%), 3: 三角波, 4: ノコギリ波, 5: サイン波, 6: ノイズ" +
-                "< オクターブを上げます。" +
-                "> オクターブを下げます。" +
-                "() 括弧内の音階を同時に鳴らします。" +
-                "yn 音を減衰させます。nが大きいほどより速く減衰します。" +
-                "wn 音高を途中で変化させます。nが100より大きければ高く、小さければ低くなります。" +
-                "vn 音量を変更します。デフォルトでは100です。" +
-                "[]n 括弧内の命令をn回繰り返します。ただし0を指定しても必ず1回は実行します。" +
+                "(波形),(音量=100),(オクターブ=±0),(デチューン=100)\n" +
+                "波形は以下の通りです。\n" +
+                "0: 矩形波(デューティー比50%), 1: 矩形波(デューティー比25%), 2: 矩形波(デューティー比12.5%), 3: 三角波, 4: ノコギリ波, 5: サイン波, 6: ノイズ\n" +
+                "< オクターブを上げます。\n" +
+                "> オクターブを下げます。\n" +
+                "() 括弧内の音階を同時に鳴らします。\n" +
+                "yn 音を減衰させます。nが大きいほどより速く減衰します。\n" +
+                "wn 音高を途中で変化させます。nが100より大きければ高く、小さければ低くなります。\n" +
+                "vn 音量を変更します。デフォルトでは100です。\n" +
+                "[]n 括弧内の命令をn回繰り返します。ただし0を指定しても必ず1回は実行します。\n" +
                 "; 音を書き込む位置を先頭に戻します。また、音がデフォルトに戻ります。\n\n" +
-                "dc!から開始する代わりにdv!から開始するとボイスチャンネルで音声を再生します。"
+                "dc!から開始する代わりにdv!から開始するとボイスチャンネルで音声を再生します。" +
+                "```"
             );
             return;
         }
-        const result = compose(command, voiceChannel);
+
+        const result = compose(command);
         if (result === null) {
             message.reply("音声の生成に失敗しました。");
             return;
         }
-        if (result instanceof ReadableStreamBuffer) {
-            if (message.member.voiceChannel) {
-                message.member.voiceChannel.join().then(connection => {
-                    const dispatcher = connection.playConvertedStream(result);
-                    dispatcher.on("end", () => {
-                        connection.disconnect();
-                    })
-                });
-            }
-        } else if (result instanceof Buffer) {
-            message.reply("音声の生成に成功しました。圧縮しています…");
-            const ffmpeg = spawn("ffmpeg", [
-                "-i", "pipe:0",
-                "-vn",
-                "-f", "mp3",
-                "-ac", "1",
-                "-ab", "192k",
-                "-ar", "44100",
-                "-acodec", "libmp3lame",
-                "pipe:1"
-            ], {
-                stdio: ["pipe", "pipe", "pipe"]
-            });
-            let mp3 = Buffer.alloc(0);
-            ffmpeg.stdout.on("data", (data: Buffer) => {
-                mp3 = Buffer.concat([mp3, data]);
-            });
-            ffmpeg.on("close", () => {
-                if (mp3.length > 8 * 1000 * 1000) {
+        message.reply("音声の生成に成功しました。エンコードしています…");
+        const ffmpeg = spawn("ffmpeg", [
+            "-i", "pipe:0",
+            "-vn",
+            "-f", "mp3",
+            "-ac", "1",
+            "-ab", "192k",
+            "-ar", "44100",
+            "-acodec", "libmp3lame",
+            "pipe:1"
+        ], {
+            stdio: ["pipe", "pipe", "pipe"]
+        });
+        let mp3 = Buffer.alloc(0);
+        ffmpeg.stdout.on("data", (data: Buffer) => {
+            mp3 = Buffer.concat([mp3, data]);
+        });
+
+        ffmpeg.on("close", () => {
+            if (voiceChannel) {
+                if (channel === null) {
+                    message.reply("チャンネル情報の取得に失敗しました。");
+                } else {
+                    const resource = createAudioResource(Readable.from(mp3));
+                    const connection = joinVoiceChannel({
+                        channelId: channel.id,
+                        guildId: channel.guild.id,
+                        adapterCreator: channel.guild.voiceAdapterCreator
+                    });
+                    const player = createAudioPlayer({behaviors: { noSubscriber: NoSubscriberBehavior.Pause }});
+                    player.on(AudioPlayerStatus.Idle, () => {
+                        connection.destroy();
+                    });
+                    connection.subscribe(player);
+                    player.play(resource);
+                }
+            } else {
+                if (mp3.length > FILE_MAXSIZE) {
                     message.reply("容量が大きすぎます。");
                     return;
                 }
-                message.reply("", {
-                    file: {
-                        attachment: mp3,
-                        name: "result.mp3"
-                    }
+                message.reply({
+                    files: [new AttachmentBuilder(mp3).setName("result.mp3")]
                 });
-            });
-            ffmpeg.stdin.write(result);
-            ffmpeg.stdin.end();
-        }
+            }
+        });
+
+        ffmpeg.stdin.write(result);
+        ffmpeg.stdin.end();
     });
 
-    if (!(await configLoad("./config/config.json"))) {
+    if (!token) {
         return false;
-    }
-    const config = getConfig();
-    await client.login(config.token);
-    return true;
+    } else {
+        await client.login(token);
+        return true;
+    };
 }
 
 (async function() {
-    console.log(await ready());
+    console.log(await ready(TOKEN));
 })();
