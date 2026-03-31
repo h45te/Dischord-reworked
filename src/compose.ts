@@ -40,8 +40,63 @@ type LoopStack = {
     loopCount: number | null
 }[];
 
+type MacroBody = {args: string[], statements: string}
+const TOKEN_PATTERNS =
+    "([a-g][-+]?|r)[0-9]*\\.?"  + "|" + // Notes
+    "[;<>()\\[]|\\][0-9]+"      + "|" + // Symbols
+    "[tlywv][0-9]+"             + "|" + // Commands
+    "@[0-9]+(,-?[0-9]+)*";              // Waves
+const MACRO_DEFINE_PATTERNS =
+    "(?<=^|;| *)"                     + // Behind semicolon or start of line
+    "(\\$[^{ ]*).*?"                  + // Label
+    "({.*?})?"                        + // Arguments
+    " *= *"                           +
+    "([^;]*?)"                        + // Statements
+    ";";
+const TOKEN_REGEXP = new RegExp(TOKEN_PATTERNS, "g");
+const MACRO_DEFINE_REGEXP = new RegExp(MACRO_DEFINE_PATTERNS, "g");
+const MACRO_CALL_REGEXP = /(\$[^{ ]*) *({.*})?/g;
+
+const replaceMacro = (s: string, macros: Map<string, MacroBody>) => s.replace(MACRO_CALL_REGEXP, (Match, label, args) => {
+    let result= "";
+    for (let i = label.length; i > 0; i--) {
+        const macro = macros.get(label.slice(0, i));
+        if (!macro) continue;
+        const argsAry = args ? args.slice(1, -1).split(",") : [];
+        let statements = macro.statements;
+        for (let i = 0; i < macro.args.length; i++) {
+            const marker = "%" + macro.args[i];
+            statements.replace(marker, argsAry[i] ?? marker);
+        }
+        result = statements + label.slice(i);
+        break;
+    }
+    return result === "" ? Match : result;
+})
+
+const parseScore = (score: string) => {
+    const macros = new Map<string, MacroBody>()
+    const macroTrimmed = score
+        .replace(/\/\*.*?\*\//g, " ")
+        .replaceAll("\n", " ")
+        .replace(MACRO_DEFINE_REGEXP, (_, label, args, statements) => {
+            macros.set(label, {
+                args: args ? args.slice(1, -1).split(",") : [],
+                statements
+            });
+            return "";
+        });
+    let current = macroTrimmed;
+    let prev = '';
+    while (current !== prev) {
+        prev = current;
+        current = replaceMacro(current, macros);
+    }
+    return current.toLowerCase().match(TOKEN_REGEXP);
+}
+
 export default function(score: string): {buffer: Buffer, token: Buffer} | null {
-    const tokens = score.toLowerCase().match(/([a-g][-+]?|r)[0-9]*\.?|[;<>()\[]|\][0-9]+|[tlywv][0-9]+|@[0-9]+(,-?[0-9]+)*/g);
+    const tokens = parseScore(score);
     if (tokens === null) {
         return null;
     }
