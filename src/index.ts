@@ -56,7 +56,7 @@ export async function ready(token: string | undefined): Promise<boolean> {
             );
             return;
         }
-
+        message.reply("音声を生成しています…");
         const result = compose(command);
         if (result === null) {
             message.reply("音声の生成に失敗しました。");
