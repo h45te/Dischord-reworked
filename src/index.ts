@@ -65,7 +65,7 @@ export async function ready(token: string | undefined): Promise<boolean> {
             if (channel === null) {
                 message.reply("チャンネル情報の取得に失敗しました。");
             } else {
-                const resource = createAudioResource(Readable.from(result));
+                const resource = createAudioResource(Readable.from(result.buffer));
                 const connection = joinVoiceChannel({
                     channelId: channel.id,
                     guildId: channel.guild.id,
@@ -77,6 +77,9 @@ export async function ready(token: string | undefined): Promise<boolean> {
                 });
                 connection.subscribe(player);
                 player.play(resource);
+                message.reply({
+                    files: [new AttachmentBuilder(result.token).setName("result.txt")]
+                });
             }
         } else {
             message.reply("音声の生成に成功しました。エンコードしています…");
@@ -101,11 +104,12 @@ export async function ready(token: string | undefined): Promise<boolean> {
                     message.reply("容量が大きすぎます。");
                     return;
                 }
-                message.reply({
-                    files: [new AttachmentBuilder(mp3).setName("result.mp3")]
-                });
+                message.reply({ files: [
+                    new AttachmentBuilder(mp3).setName("result.mp3"),
+                    new AttachmentBuilder(result.token).setName("result.txt")
+                ]});
             });
-            ffmpeg.stdin.write(result);
+            ffmpeg.stdin.write(result.buffer);
             ffmpeg.stdin.end();
         };
     });

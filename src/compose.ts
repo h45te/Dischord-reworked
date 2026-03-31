@@ -40,7 +40,7 @@ type LoopStack = {
     loopCount: number | null
 }[];
 
-export default function(score: string): Buffer | null  {
+export default function(score: string): {buffer: Buffer, token: Buffer} | null {
     const tokens = score.toLowerCase().match(/([a-g][-+]?|r)[0-9]*\.?|[;<>()\[]|\][0-9]+|[tlywv][0-9]+|@[0-9]+(,-?[0-9]+)*/g);
     if (tokens === null) {
         return null;
@@ -284,5 +284,8 @@ export default function(score: string): Buffer | null  {
     header.writeUInt16LE(16, 34);
     header.write("data", 36);
     header.writeUInt32LE(bufferLength * 2, 40);
-    return Buffer.concat([header, buffer], 44 + bufferLength * 2);
+    return {
+        buffer: Buffer.concat([header, buffer], 44 + bufferLength * 2),
+        token: Buffer.from(tokens.join(''))
+    };
 }
