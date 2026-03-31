@@ -31,10 +31,6 @@ export async function ready(token: string | undefined): Promise<boolean> {
         const channel = member.voice.channel;
         const voiceChannel = mes.startsWith(VOICE_PREFIX) && !!channel;
         const command = mes.slice(3);
-        if (command.length > 1000) {
-            await message.reply("コマンドが長すぎます。");
-            return;
-        }
         if (command.trim() === "help") {
             message.reply(
                 "```" +
@@ -43,6 +39,7 @@ export async function ready(token: string | undefined): Promise<boolean> {
                 "CDEFGABR それぞれドレミファソラシと休符に対応し、音を鳴らします。直後に数字を指定するとn分音符を鳴らします。ピリオドを付けると付点音符になります。\n" + 
                 "L デフォルトの音の長さをn分音符形式で指定します。\n" + 
                 "T テンポを指定します。デフォルトは120です。\n" +
+                "O オクターブを指定します。A5=880Hzで定義されています。デフォルトでは5です。" +
                 "@ 音を指定します。カンマ区切りでパラメータを指定します。複数指定すると音が重なります。パラメータは以下の通りです。(内容=デフォルト値)\n" +
                 "(波形),(音量=100),(オクターブ=±0),(デチューン=100)\n" +
                 "波形は以下の通りです。\n" +
@@ -60,7 +57,7 @@ export async function ready(token: string | undefined): Promise<boolean> {
             );
             return;
         }
-
+        message.reply("音声を生成しています…");
         const result = compose(command);
         if (result === null) {
             message.reply("音声の生成に失敗しました。");
@@ -69,7 +66,7 @@ export async function ready(token: string | undefined): Promise<boolean> {
             if (channel === null) {
                 message.reply("チャンネル情報の取得に失敗しました。");
             } else {
-                const resource = createAudioResource(Readable.from(result));
+                const resource = createAudioResource(Readable.from(result.buffer));
                 const connection = joinVoiceChannel({
                     channelId: channel.id,
                     guildId: channel.guild.id,
@@ -81,6 +78,9 @@ export async function ready(token: string | undefined): Promise<boolean> {
                 });
                 connection.subscribe(player);
                 player.play(resource);
+                message.reply({
+                    files: [new AttachmentBuilder(result.token).setName("result.txt")]
+                });
             }
         } else {
             message.reply("音声の生成に成功しました。エンコードしています…");
@@ -105,11 +105,12 @@ export async function ready(token: string | undefined): Promise<boolean> {
                     message.reply("容量が大きすぎます。");
                     return;
                 }
-                message.reply({
-                    files: [new AttachmentBuilder(mp3).setName("result.mp3")]
-                });
+                message.reply({ files: [
+                    new AttachmentBuilder(mp3).setName("result.mp3"),
+                    new AttachmentBuilder(result.token).setName("result.txt")
+                ]});
             });
-            ffmpeg.stdin.write(result);
+            ffmpeg.stdin.write(result.buffer);
             ffmpeg.stdin.end();
         };
     });

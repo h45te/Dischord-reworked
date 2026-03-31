@@ -11,6 +11,7 @@ type Scale = {
     [key: string]: number
 }
 
+// A5 = 880Hz
 const frequencyScale: Scale = {
     "c-":  493.883,
     "c" :  523.251,
@@ -40,8 +41,63 @@ type LoopStack = {
     loopCount: number | null
 }[];
 
-export default function(score: string): Buffer | null  {
-    const tokens = score.toLowerCase().match(/([a-g][-+]?|r)[0-9]*\.?|[;<>()\[]|\][0-9]+|[tlywv][0-9]+|@[0-9]+(,-?[0-9]+)*/g);
+type MacroBody = {args: string[], statements: string}
+const TOKEN_PATTERNS =
+    "([a-g][-+]?|r)[0-9]*\\.?"  + "|" + // Notes
+    "[;<>()\\[]|\\][0-9]+"      + "|" + // Symbols
+    "[tlywvo][0-9]+"            + "|" + // Commands
+    "@[0-9]+(,-?[0-9]+)*";              // Waves
+const MACRO_DEFINE_PATTERNS =
+    "(?<=^|;| *)"                     + // Behind semicolon or start of line
+    "(\\$[^{ ]*).*?"                  + // Label
+    "({.*?})?"                        + // Arguments
+    " *= *"                           +
+    "([^;]*?)"                        + // Statements
+    ";";
+const TOKEN_REGEXP = new RegExp(TOKEN_PATTERNS, "g");
+const MACRO_DEFINE_REGEXP = new RegExp(MACRO_DEFINE_PATTERNS, "g");
+const MACRO_CALL_REGEXP = /(\$[^{ ]*) *({.*})?/g;
+
+const replaceMacro = (s: string, macros: Map<string, MacroBody>) => s.replace(MACRO_CALL_REGEXP, (Match, label, args) => {
+    let result= "";
+    for (let i = label.length; i > 0; i--) {
+        const macro = macros.get(label.slice(0, i));
+        if (!macro) continue;
+        const argsAry = args ? args.slice(1, -1).split(",") : [];
+        let statements = macro.statements;
+        for (let i = 0; i < macro.args.length; i++) {
+            const marker = "%" + macro.args[i];
+            statements.replace(marker, argsAry[i] ?? marker);
+        }
+        result = statements + label.slice(i);
+        break;
+    }
+    return result === "" ? Match : result;
+})
+
+const parseScore = (score: string) => {
+    const macros = new Map<string, MacroBody>()
+    const macroTrimmed = score
+        .replace(/\/\*.*?\*\//g, " ")
+        .replaceAll("\n", " ")
+        .replace(MACRO_DEFINE_REGEXP, (_, label, args, statements) => {
+            macros.set(label, {
+                args: args ? args.slice(1, -1).split(",") : [],
+                statements
+            });
+            return "";
+        });
+    let current = macroTrimmed;
+    let prev = '';
+    while (current !== prev) {
+        prev = current;
+        current = replaceMacro(current, macros);
+    }
+    return current.toLowerCase().match(TOKEN_REGEXP);
+}
+
+export default function(score: string): {buffer: Buffer, token: Buffer} | null {
+    const tokens = parseScore(score);
     if (tokens === null) {
         return null;
     }
@@ -61,7 +117,7 @@ export default function(score: string): Buffer | null  {
     let volume = 1;
     const loopStack: LoopStack = [];
     const tokenLength = tokens.length;
-    const limit = 10 * 1000 * 1000 / 2;
+    const limit = 10 * 1000 * 1000 * 1000 / 2;
     for (let i = 0; i < tokenLength; i++) {
         const currentToken = tokens[i];
         if (currentToken[0] === "r") {
@@ -237,6 +293,8 @@ export default function(score: string): Buffer | null  {
             sweep = Number(currentToken.slice(1)) / 100;
         } else if (currentToken[0] === "v") {
             volume = Number(currentToken.slice(1)) / 100;
+        } else if (currentToken[0] === "o") {
+            octave = Number(currentToken.slice(1)) - 5;
         } else if (currentToken[0] === "@") {
             const parameters = currentToken.slice(1).split(",");
             const types: WaveType[] = ["square50", "square25", "square12.5", "triangle", "saw", "sine", "noise"];
@@ -284,5 +342,8 @@ export default function(score: string): Buffer | null  {
     header.writeUInt16LE(16, 34);
     header.write("data", 36);
     header.writeUInt32LE(bufferLength * 2, 40);
-    return Buffer.concat([header, buffer], 44 + bufferLength * 2);
+    return {
+        buffer: Buffer.concat([header, buffer], 44 + bufferLength * 2),
+        token: Buffer.from(tokens.join(''))
+    };
 }
