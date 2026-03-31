@@ -11,6 +11,7 @@ type Scale = {
     [key: string]: number
 }
 
+// A5 = 880Hz
 const frequencyScale: Scale = {
     "c-":  493.883,
     "c" :  523.251,
@@ -44,7 +45,7 @@ type MacroBody = {args: string[], statements: string}
 const TOKEN_PATTERNS =
     "([a-g][-+]?|r)[0-9]*\\.?"  + "|" + // Notes
     "[;<>()\\[]|\\][0-9]+"      + "|" + // Symbols
-    "[tlywv][0-9]+"             + "|" + // Commands
+    "[tlywvo][0-9]+"            + "|" + // Commands
     "@[0-9]+(,-?[0-9]+)*";              // Waves
 const MACRO_DEFINE_PATTERNS =
     "(?<=^|;| *)"                     + // Behind semicolon or start of line
@@ -292,6 +293,8 @@ export default function(score: string): {buffer: Buffer, token: Buffer} | null {
             sweep = Number(currentToken.slice(1)) / 100;
         } else if (currentToken[0] === "v") {
             volume = Number(currentToken.slice(1)) / 100;
+        } else if (currentToken[0] === "o") {
+            octave = Number(currentToken.slice(1)) - 5;
         } else if (currentToken[0] === "@") {
             const parameters = currentToken.slice(1).split(",");
             const types: WaveType[] = ["square50", "square25", "square12.5", "triangle", "saw", "sine", "noise"];
