@@ -31,10 +31,6 @@ export async function ready(token: string | undefined): Promise<boolean> {
         const channel = member.voice.channel;
         const voiceChannel = mes.startsWith(VOICE_PREFIX) && !!channel;
         const command = mes.slice(3);
-        if (command.length > 1000) {
-            await message.reply("コマンドが長すぎます。");
-            return;
-        }
         if (command.trim() === "help") {
             message.reply(
                 "```" +
